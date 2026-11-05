@@ -98,8 +98,24 @@ cd android-app
 ```
 
 Gradle 8.14.3, AGP 8.13.2, Kotlin 2.1.0, `compileSdk`/`targetSdk` 35, `minSdk` 26 are used.
-Gradle runs on JDK 17 – the path is set in `gradle.properties` (`org.gradle.java.home`), because
-Kotlin 2.1 cannot work with JDK 25.
+
+Gradle must run on **JDK 17-21**. Kotlin 2.1 cannot parse a newer major version and fails with
+`IllegalArgumentException: 25.0.5`, so a machine whose default JDK is newer has to say which one to
+use:
+
+```bash
+# for one build
+JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug
+```
+
+```properties
+# or permanently, in %USERPROFILE%\.gradle\gradle.properties (or ~/.gradle/gradle.properties)
+org.gradle.java.home=C\:\\Program Files\\Eclipse Adoptium\\jdk-17
+```
+
+Android Studio does the same in *Settings → Build, Execution, Deployment → Build Tools → Gradle →
+Gradle JDK*. The path is deliberately **not** in the project's `gradle.properties` – it differs on
+every machine.
 
 ## Running
 
