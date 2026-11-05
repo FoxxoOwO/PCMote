@@ -1,0 +1,7 @@
+# Keep shell scripts and Gradle wrapper text files LF even on Windows checkouts
+*.sh            text eol=lf
+gradlew         text eol=lf
+*.bat           text eol=crlf
+*.jar           binary
+*.png           binary
+*.ico           binary

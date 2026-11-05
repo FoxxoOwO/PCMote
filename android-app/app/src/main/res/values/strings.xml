@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PCMote</string>
+    <string name="subtitle">Control the player on your PC</string>
+
+    <string name="status_connected">Connected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_disconnected">Not connected</string>
+    <string name="status_error">Connection error</string>
+
+    <string name="action_connect">Connect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_change_pc">Change PC</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_refresh">Refresh scan</string>
+
+    <string name="now_playing_placeholder">Nothing is playing</string>
+    <string name="unknown_artist">Unknown artist</string>
+    <string name="unknown_album">Unknown album</string>
+    <string name="source_prefix">Source</string>
+
+    <string name="cd_play">Play</string>
+    <string name="cd_pause">Pause</string>
+    <string name="cd_next">Next track</string>
+    <string name="cd_previous">Previous track</string>
+    <string name="cd_volume_up">Increase PC volume</string>
+    <string name="cd_volume_down">Decrease PC volume</string>
+    <string name="volume_percent">%1$d %%</string>
+    <string name="volume_muted">Muted</string>
+    <string name="volume_unknown">—</string>
+    <string name="cd_artwork">Album artwork</string>
+
+    <string name="discovery_title">Found devices</string>
+    <string name="discovery_empty">No PC found. Start the daemon and tap Refresh.</string>
+    <string name="discovery_scanning">Searching for a PC on the network…</string>
+    <string name="discovery_not_found">No PC was found. Check that the daemon is running, or enter the IP address manually.</string>
+
+    <string name="dialog_manual_title">Connect to PC</string>
+    <string name="dialog_ip_label">IP address or hostname</string>
+    <string name="dialog_port_label">Port</string>
+
+    <string name="notification_channel_name">Playback on PC</string>
+</resources>

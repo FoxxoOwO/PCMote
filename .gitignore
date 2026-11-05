@@ -1,0 +1,25 @@
+# Android / Gradle
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+android-app/.idea/
+android-app/*.iml
+android-app/captures/
+android-app/gradle-*.zip
+android-app/gradle-*/
+
+# Python
+pc-daemon/venv/
+pc-daemon/.venv/
+pc-daemon/__pycache__/
+pc-daemon/*.pyc
+pc-daemon/build/
+pc-daemon/dist/
+pc-daemon/*.spec
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+*.log

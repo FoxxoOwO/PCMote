@@ -1,0 +1,23 @@
+# PCMote – Windows daemon
+# Python 3.11+ (testováno na 3.13/3.15). Instalace: py -m pip install -r requirements.txt
+
+# WebSocket server
+websockets>=14,<18
+
+# Automatické nalezení serveru v LAN (_pcmote._tcp.local.)
+zeroconf>=0.131
+
+# Ikona v System Tray a generování ikony
+pystray>=0.19.5
+Pillow>=10.0
+
+# WinRT projekce pro GlobalSystemMediaTransportControlsSessionManager
+# (starší monolitický balíček "winsdk" nemá kola pro Python 3.13+)
+winrt-runtime>=3.0
+winrt-Windows.Media.Control>=3.0
+winrt-Windows.Storage.Streams>=3.0
+winrt-Windows.Foundation>=3.0
+winrt-Windows.Foundation.Collections>=3.0
+
+# Hlasitost výchozího zvukového výstupu (WASAPI / IAudioEndpointVolume)
+pycaw>=20240210
