@@ -93,6 +93,6 @@ missing).
 
 ## Requirements for building the Android part
 
-Gradle 8.14.3, AGP 8.13.2, Kotlin 2.1.0, JDK 17 (the path is set in
-`android-app/gradle.properties`), `compileSdk`/`targetSdk` 35, `minSdk` 26. The Android SDK has to
-be installed (`ANDROID_HOME`).
+Gradle 8.14.3, AGP 8.13.2, Kotlin 2.1.0, `compileSdk`/`targetSdk` 35, `minSdk` 26. The Android SDK
+has to be installed (`ANDROID_HOME`) and Gradle has to run on **JDK 17-21** – see
+[`android-app/README.md`](android-app/README.md#building) for how to point it there.
