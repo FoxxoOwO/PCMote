@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 try:  # jen Windows; import chráníme, aby modul šlo načíst i jinde (testy, CI)
     import winreg
@@ -64,7 +63,7 @@ def executable_command() -> str:
 def build_command(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
-    extra_args: Optional[list[str]] = None,
+    extra_args: list[str] | None = None,
 ) -> str:
     """Sestaví celý příkaz pro registr včetně ``--autostart`` a portu."""
     parts = [executable_command(), AUTOSTART_FLAG]
@@ -82,7 +81,7 @@ def _normalize(command: str) -> str:
     return command.replace("/", "\\").strip().strip('"').casefold()
 
 
-def read_value() -> Optional[str]:
+def read_value() -> str | None:
     """Vrátí příkaz uložený v registru, nebo ``None`` když autostart není."""
     if not is_supported():
         return None
@@ -115,7 +114,7 @@ def is_current(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
     return _normalize(stored) == _normalize(build_command(host=host, port=port))
 
 
-def enable(command: Optional[str] = None) -> str:
+def enable(command: str | None = None) -> str:
     """Zapíše položku do registru a vrátí uložený příkaz."""
     if not is_supported():
         raise AutostartError("Automatické spuštění podporuje jen Windows.")

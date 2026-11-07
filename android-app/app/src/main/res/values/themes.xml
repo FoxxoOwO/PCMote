@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Compose draws everything; the platform theme only needs to be action-bar free. -->
-    <style name="Theme.PCMote" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+    <style name="Theme.PCMote" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- These are just for the window background before Compose takes over -->
+        <item name="android:windowBackground">@color/background_light</item>
+    </style>
+
+    <style name="Theme.PCMote.NoActionBar" parent="Theme.PCMote">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
     </style>
 </resources>
