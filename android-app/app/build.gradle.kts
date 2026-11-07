@@ -1,28 +1,34 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
     namespace = "com.pcmote"
-    compileSdk = 35
+    compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
         applicationId = "com.pcmote"
-        minSdk = 26
-        targetSdk = 35
+        minSdk = libs.versions.minSdk.get().toInt()
+        targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "1.0.1"
+        vectorDrawables.useSupportLibrary = true
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            isMinifyEnabled = false
+            isDebuggable = true
         }
     }
 
@@ -33,58 +39,58 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += listOf("-Xopt-in=kotlin.RequiresOptIn")
     }
 
-    buildFeatures {
-        compose = true
-    }
-
-    lint {
-        // Lint suggests merging mipmap-anydpi-v26 into mipmap-anydpi because minSdk is 26,
-        // but AAPT2 then fails with "resource mipmap/ic_launcher not found", so the version
-        // qualifier has to stay.
-        disable += "ObsoleteSdkInt"
+    composeOptions {
+        kotlinCompilerExtensionVersion = libs.versions.composeBom.get()
     }
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/{AL2.0,LGPL2.1,LICENSE,LICENSE.txt,NOTICE,NOTICE.txt}"
         }
     }
 }
 
 dependencies {
-    // Core / lifecycle
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    // AndroidX Core & Lifecycle
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.activity.compose)
 
-    // Compose + Material 3 Expressive
-    // material3 1.5.0-alpha08 exposes MaterialExpressiveTheme, MotionScheme.expressive()
-    // and the expressive component set as public API while still depending on Compose 1.8.x,
-    // which is what AGP 8.7.x / compileSdk 35 support.
-    implementation("androidx.compose.ui:ui:1.8.2")
-    implementation("androidx.compose.ui:ui-graphics:1.8.2")
-    implementation("androidx.compose.ui:ui-tooling-preview:1.8.2")
-    implementation("androidx.compose.foundation:foundation:1.8.2")
-    implementation("androidx.compose.material3:material3:1.5.0-alpha08")
-    implementation("androidx.compose.material3:material3-window-size-class:1.5.0-alpha08")
+    // Compose BOM + Material3
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation("com.google.android.material:material:1.12.0")
 
-    // Media3: MediaSessionService + SimpleBasePlayer
-    implementation("androidx.media3:media3-session:1.4.1")
-    implementation("androidx.media3:media3-common:1.4.1")
+    // Media3
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.ui)
+
+    // Network
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    implementation("com.google.code.gson:gson:2.11.0")
 
     // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation(libs.kotlinx.coroutines.android)
 
-    // WebSocket + JSON
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.code.gson:gson:2.10.1")
+    // Serialization
+    implementation(libs.kotlinx.serialization.json)
 
-    // Tests
+    // DateTime
+    implementation(libs.kotlinx.datetime)
+
+    // Testing
     testImplementation("junit:junit:4.13.2")
-
-    debugImplementation("androidx.compose.ui:ui-tooling:1.8.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-tooling-preview")
 }

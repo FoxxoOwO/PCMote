@@ -127,7 +127,11 @@ class MediaProxyService : MediaSessionService() {
                 "playWhenReady=${session.player.playWhenReady}"
         )
         try {
-            super.onUpdateNotification(session, startInForegroundRequired)
+            // Media3 hides the notification (and leaves the foreground) whenever the player is
+            // not "playWhenReady". For a remote-controlled player that is wrong: pausing on the
+            // PC must not remove the controls from the phone. Ask for the foreground anyway so
+            // the card also survives a pause, a dropped connection and a STOPPED PC.
+            super.onUpdateNotification(session, true)
         } catch (t: Throwable) {
             Log.e(TAG, "Cannot update the media notification", t)
         }

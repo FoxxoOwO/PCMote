@@ -16,13 +16,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Callable, Optional
+from datetime import UTC, datetime
+from io import BytesIO
 
+from PIL import Image
 from winrt.windows.media.control import (
     GlobalSystemMediaTransportControlsSession as MediaSession,
+)
+from winrt.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+)
+from winrt.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 )
 from winrt.windows.storage.streams import DataReader
@@ -38,6 +45,18 @@ MAX_ARTWORK_BYTES = 8 * 1024 * 1024
 #: Windows zpřístupní thumbnail často až později než metadata, proto se čtení opakuje.
 ARTWORK_RETRY_DELAY = 1.0
 MAX_ARTWORK_RETRIES = 5
+
+#: WinRT volání občas visí (COM se zasekne) – po této době ho považujeme za mrtvé.
+REFRESH_TIMEOUT = 5.0
+
+#: Záchranný polling: i bez událostí z WinRT pravidelný refresh udrží stav a pozici živé.
+SAFETY_POLL_INTERVAL = 2.0
+
+#: Po transportním příkazu Windows chvíli trvá, než promítne nový stav do timeline.
+COMMAND_SETTLE_MS = 250
+
+#: Maximální rozměry artworku pro odeslání na telefon (downscale).
+MAX_ARTWORK_DIMENSION = 512
 
 #: Mapování WinRT stavu na stavy definované protokolem.
 _WIRE_STATE = {
@@ -57,8 +76,8 @@ class MediaSnapshot:
     album: str = ""
     duration_ms: int = 0
     position_ms: int = 0
-    artwork_hash: Optional[str] = None
-    artwork: Optional[bytes] = None
+    artwork_hash: str | None = None
+    artwork: bytes | None = None
 
     def to_wire(self) -> dict:
         """Převede snapshot na JSON kompatibilní se specifikací protokolu."""
@@ -81,19 +100,21 @@ class MediaController:
 
     def __init__(self, on_update: Callable[[MediaSnapshot], None]) -> None:
         self._on_update = on_update
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._manager: Optional[SessionManager] = None
-        self._session: Optional[MediaSession] = None
-        self._manager_token: Optional[int] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._manager: SessionManager | None = None
+        self._session: MediaSession | None = None
+        self._manager_token: int | None = None
         self._session_tokens: list[tuple[str, int]] = []
-        self._refresh_lock: Optional[asyncio.Lock] = None
-        self._pending_task: Optional[asyncio.Task] = None
+        self._refresh_lock: asyncio.Lock | None = None
+        self._pending_task: asyncio.Task | None = None
         self._snapshot = MediaSnapshot()
-        self._artwork_hash: Optional[str] = None
-        self._artwork_bytes: Optional[bytes] = None
-        self._artwork_title: Optional[str] = None
+        self._artwork_hash: str | None = None
+        self._artwork_bytes: bytes | None = None
+        self._artwork_title: str | None = None
         self._artwork_retries = 0
-        self._artwork_task: Optional[asyncio.Task] = None
+        self._artwork_task: asyncio.Task | None = None
+        self._safety_task: asyncio.Task | None = None
+        self._timeouts = 0
         self._stopped = False
 
     # ------------------------------------------------------------------ stav
@@ -129,6 +150,25 @@ class MediaController:
 
         await self._attach_current_session()
         await self.refresh()
+        self._safety_task = self._loop.create_task(self._safety_poll())
+
+    async def _safety_poll(self) -> None:
+        """Pravidelný refresh, který udrží stav a pozici živé i bez WinRT událostí.
+
+        Windows některé přehrávače nehlásí spolehlivě (timeline se neaktualizuje,
+        událost nedorazí). Polling je záchranná síť, ne hlavní cesta – proto je
+        pomalý a používá stejný timeout jako událostní refresh.
+        """
+        try:
+            while not self._stopped:
+                await asyncio.sleep(SAFETY_POLL_INTERVAL)
+                if self._stopped:
+                    return
+                await self._refresh_safely("safety-poll")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Záchranný polling selhal")
 
     async def stop(self) -> None:
         """Odregistruje všechny WinRT handlery a ukončí činnost."""
@@ -139,6 +179,9 @@ class MediaController:
         if self._artwork_task is not None and not self._artwork_task.done():
             self._artwork_task.cancel()
             self._artwork_task = None
+        if self._safety_task is not None and not self._safety_task.done():
+            self._safety_task.cancel()
+            self._safety_task = None
 
         self._detach_session()
 
@@ -173,15 +216,49 @@ class MediaController:
     def _request_refresh(self, reason: str) -> None:
         if self._stopped:
             return
-        if self._pending_task is not None and not self._pending_task.done():
-            # Události přicházejí v dávkách; jeden běžící refresh stačí.
-            return
-        self._pending_task = asyncio.create_task(self._refresh_safely(reason))
+        task = self._pending_task
+        if task is not None and not task.done():
+            # Běžící refresh obvykle stačí. Když ale visí na WinRT volání, další
+            # události by se už nikdy nezpracovaly – proto ho po timeoutu zabijeme.
+            try:
+                started = task._pcmote_started
+            except AttributeError:
+                started = None
+            if started is None:
+                started = self._loop.time() if self._loop else 0.0
+                task._pcmote_started = started
+            if self._loop is not None and self._loop.time() - started < REFRESH_TIMEOUT:
+                return
+            logger.warning(
+                "Refresh visí >%.0f s (%s) – ruším a zkouším znovu", REFRESH_TIMEOUT, reason
+            )
+            task.cancel()
+        created = asyncio.create_task(self._refresh_safely(reason))
+        if self._loop is not None:
+            created._pcmote_started = self._loop.time()
+        self._pending_task = created
 
     async def _refresh_safely(self, reason: str) -> None:
         try:
-            await self._attach_current_session()
-            await self.refresh()
+            await asyncio.wait_for(
+                self._attach_current_session(), timeout=REFRESH_TIMEOUT
+            )
+            await asyncio.wait_for(self.refresh(), timeout=REFRESH_TIMEOUT)
+            self._timeouts = 0
+        except TimeoutError:
+            # WinRT/COM přestal odpovídat (typicky hned po transportním příkazu).
+            # Zahodíme relaci a po druhém timeoutu v řadě i celý manager.
+            self._timeouts += 1
+            logger.warning(
+                "Refresh vypršel (%.0f s, %s) – obnovuji relaci (timeout #%d)",
+                REFRESH_TIMEOUT,
+                reason,
+                self._timeouts,
+            )
+            self._detach_session()
+            if self._timeouts >= 2:
+                self._manager = None
+                self._timeouts = 0
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -189,15 +266,65 @@ class MediaController:
 
     # ------------------------------------------------------------- relace
 
-    async def _attach_current_session(self) -> None:
-        """Přepne se na aktuální relaci a zaregistruje její handlery."""
-        if self._manager is None:
-            return
+    @staticmethod
+    def _session_status(session) -> int:
+        """Vrátí WinRT playback status relace (4 = PLAYING) nebo -1."""
         try:
-            session = self._manager.get_current_session()
+            info = session.get_playback_info()
+            return int(info.playback_status) if info is not None else -1
+        except (AttributeError, TypeError, OSError):
+            # Relace mohla mezitím zmizet (přehrávač zavřen) – bereme jako neznámý stav.
+            return -1
+
+    def _pick_session(self):
+        """Vybere relaci, kterou chceme ovládat.
+
+        ``GetCurrentSession()`` vrací tu, kterou Windows naposledy považovaly za
+        aktivní – a to se mění samo (prohlížeč přehraje video, jiná app zahraje
+        zvuk). Slepé následování má za následek, že telefon ovládá cizí aplikaci
+        a stav skutečného přehrávače se přestane aktualizovat.
+
+        Pořadí priorit:
+        1. relace, kterou jsme ovládali naposledy, pokud stále existuje,
+        2. jakákoli relace, která právě hraje,
+        3. ``GetCurrentSession()`` jako poslední záchrana.
+        """
+        manager = self._manager
+        if manager is None:
+            return None
+
+        try:
+            sessions = list(manager.get_sessions())
+        except Exception:
+            logger.exception("GetSessions selhalo")
+            sessions = []
+
+        if self._session is not None:
+            current_id = self._source_app_id(self._session)
+            for candidate in sessions:
+                if self._source_app_id(candidate) == current_id:
+                    if self._session_status(candidate) == 4:
+                        # Stále hraje – držíme se ho, i když Windows vybral jinam.
+                        return candidate
+                    break
+
+        for candidate in sessions:
+            if self._session_status(candidate) == 4:
+                return candidate
+
+        try:
+            return manager.get_current_session()
         except Exception:
             logger.exception("GetCurrentSession selhalo")
-            return
+            return None
+
+    async def _attach_current_session(self) -> None:
+        """Přepne se na relaci, kterou chceme ovládat, a zaregistruje handlery."""
+        if self._manager is None:
+            await self._request_manager()
+            if self._manager is None:
+                return
+        session = self._pick_session()
 
         if session is self._session:
             return
@@ -219,6 +346,34 @@ class MediaController:
                 self._session_tokens.append((name, register(handler)))
             except Exception:
                 logger.exception("Registrace %s selhala", name)
+
+    async def _request_manager(self) -> None:
+        """Znovu si vyžádá SessionManager.
+
+        WinRT občas přestane odpovídat poté, co přehrávač dostal transportní
+        příkaz – starý manager i jeho relace pak visí. Nový manager je jediná
+        spolehlivá cesta, jak se z toho dostat.
+        """
+        try:
+            self._manager = await asyncio.wait_for(
+                SessionManager.request_async(), timeout=REFRESH_TIMEOUT
+            )
+            if self._manager_token is not None:
+                try:
+                    self._manager.remove_current_session_changed(self._manager_token)
+                except Exception:
+                    logger.debug("Odregistrace starého handleru selhala", exc_info=True)
+                self._manager_token = None
+            try:
+                self._manager_token = self._manager.add_current_session_changed(
+                    self._on_manager_event
+                )
+            except Exception:
+                logger.exception("Registrace CurrentSessionChanged selhala")
+            logger.info("SessionManager obnoven")
+        except Exception:
+            logger.warning("SessionManager se nepodařilo obnovit", exc_info=True)
+            self._manager = None
 
     def _detach_session(self) -> None:
         session = self._session
@@ -250,30 +405,73 @@ class MediaController:
     def _source_app_id(session: MediaSession) -> str:
         try:
             return session.source_app_user_model_id or ""
-        except Exception:
+        except (AttributeError, TypeError):
             return ""
 
     # ------------------------------------------------------------- čtení stavu
 
     async def refresh(self) -> None:
-        """Přečte aktuální stav z WinRT a publikuje snapshot."""
+        """Přečte aktuální stav z WinRT a publikuje snapshot.
+
+        WinRT (COM) volání jsou **synchronní a mohou blokovat** – `await` nad nimi
+        jen zdánlivě předá řízení, ve skutečnosti drží GIL a s ním i celý event
+        loop. Když se COM zasekne, zamrzne daemon i WebSocket. Proto se veškeré
+        čtení provádí v jednom vyhrazeném vlákně, kde zaseknutí neškodí.
+        """
         if self._stopped:
             return
+        snapshot = await self._read_snapshot_in_thread()
+        if snapshot is not None:
+            self._publish(snapshot)
+
+    async def _read_snapshot_in_thread(self) -> MediaSnapshot | None:
+        """Spustí :meth:`_read_snapshot` ve vyhrazeném vlákně a čeká na výsledek."""
         session = self._session
         if session is None:
             if self._snapshot != MediaSnapshot():
                 self._artwork_title = None
                 self._artwork_hash = None
                 self._artwork_bytes = None
-            self._publish(MediaSnapshot())
-            return
+            return MediaSnapshot()
 
-        source_app = self._source_app_id(session)
-        title = artist = album = ""
-        artwork: Optional[bytes] = None
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[MediaSnapshot | None] = loop.create_future()
+
+        def _resolve(value: MediaSnapshot | None) -> None:
+            if not future.done():
+                future.set_result(value)
+
+        def _reject(exc: BaseException) -> None:
+            if not future.done():
+                future.set_exception(exc)
+
+        def _worker() -> None:
+            try:
+                result = self._read_snapshot(session)
+            except BaseException as exc:  # noqa: BLE001 - předáváme do event loopu
+                loop.call_soon_threadsafe(_reject, exc)
+            else:
+                loop.call_soon_threadsafe(_resolve, result)
+
+        # Vlákno je daemon: pokud COM zamrzne, aplikace se i tak ukončí.
+        threading.Thread(
+            target=_worker, name="pcmote-winrt-read", daemon=True
+        ).start()
 
         try:
-            props = await session.try_get_media_properties_async()
+            return await asyncio.wait_for(future, timeout=REFRESH_TIMEOUT)
+        except TimeoutError:
+            logger.warning("WinRT čtení neodpovědělo do %.0f s", REFRESH_TIMEOUT)
+            return None
+
+    def _read_snapshot(self, session) -> MediaSnapshot | None:
+        """Synchronní čtení stavu z WinRT – běží ve vyhrazeném vlákně."""
+        source_app = self._source_app_id(session)
+        title = artist = album = ""
+        artwork: bytes | None = None
+
+        try:
+            props = session.try_get_media_properties_async().get()
         except Exception:
             logger.exception("TryGetMediaPropertiesAsync selhalo")
             props = None
@@ -283,14 +481,12 @@ class MediaController:
             artist = props.artist or ""
             album = props.album_title or ""
             if title != self._artwork_title:
-                # Jiná skladba – obal z mezipaměti už neplatí.
                 self._artwork_title = title
                 self._artwork_hash = None
                 self._artwork_bytes = None
                 self._artwork_retries = 0
-            artwork = await self._read_artwork(props.thumbnail)
+            artwork = self._read_artwork_sync(props.thumbnail)
             if artwork is None:
-                # Thumbnail nemusí být v tuhle chvíli ještě k dispozici.
                 self._schedule_artwork_retry()
 
         state = "STOPPED"
@@ -316,18 +512,16 @@ class MediaController:
         except Exception:
             logger.exception("GetTimelineProperties selhalo")
 
-        self._publish(
-            MediaSnapshot(
-                source_app=source_app,
-                state=state,
-                title=title,
-                artist=artist,
-                album=album,
-                duration_ms=duration_ms,
-                position_ms=position_ms,
-                artwork_hash=self._artwork_hash,
-                artwork=artwork if artwork is not None else self._artwork_bytes,
-            )
+        return MediaSnapshot(
+            source_app=source_app,
+            state=state,
+            title=title,
+            artist=artist,
+            album=album,
+            duration_ms=duration_ms,
+            position_ms=position_ms,
+            artwork_hash=self._artwork_hash,
+            artwork=artwork if artwork is not None else self._artwork_bytes,
         )
 
     def _publish(self, snapshot: MediaSnapshot) -> None:
@@ -339,16 +533,15 @@ class MediaController:
         except Exception:
             logger.exception("Zpracování snapshotu selhalo")
 
-    async def _read_artwork(self, thumbnail) -> Optional[bytes]:
-        """Přečte thumbnail stream a vrátí jeho bajty (nebo ``None``)."""
+    def _read_artwork_sync(self, thumbnail) -> bytes | None:
+        """Přečte thumbnail, downscale na MAX_ARTWORK_DIMENSION (synchronně, ve vlákně)."""
         if thumbnail is None:
-            # Mezipaměť nemažeme – o novou skladbu se stará :meth:`refresh`.
             return None
 
         stream = None
         reader = None
         try:
-            stream = await thumbnail.open_read_async()
+            stream = thumbnail.open_read_async().get()
             size = int(stream.size)
             if size <= 0 or size > MAX_ARTWORK_BYTES:
                 logger.warning("Artwork má nepoužitelnou velikost: %s B", size)
@@ -356,14 +549,13 @@ class MediaController:
 
             try:
                 reader = DataReader(stream)
-                await reader.load_async(size)
+                reader.load_async(size).get()
                 payload = reader.read_buffer(size)
             except TypeError:
-                # Některé verze pywinrt vyžadují explicitní input stream.
                 if reader is not None:
                     reader.close()
                 reader = DataReader(stream.get_input_stream_at(0))
-                await reader.load_async(size)
+                reader.load_async(size).get()
                 payload = reader.read_buffer(size)
 
             data = bytes(payload)
@@ -385,6 +577,20 @@ class MediaController:
         if not data:
             return None
 
+        # Downscale, aby se na telefon neposílal 1,4MB obal.
+        try:
+            with Image.open(BytesIO(data)) as img:
+                img.load()
+                if img.width > MAX_ARTWORK_DIMENSION or img.height > MAX_ARTWORK_DIMENSION:
+                    img.thumbnail((MAX_ARTWORK_DIMENSION, MAX_ARTWORK_DIMENSION), Image.LANCZOS)
+                    buf = BytesIO()
+                    fmt = img.format if img.format in ("JPEG", "PNG") else "PNG"
+                    img.save(buf, format=fmt, optimize=True)
+                    data = buf.getvalue()
+                    logger.debug("Artwork downscaled na %dx%d (%d B)", img.width, img.height, len(data))
+        except Exception:
+            logger.warning("Downscale artworku selhalo, používám původní", exc_info=True)
+
         digest = hashlib.sha256(data).hexdigest()
         self._artwork_hash = digest
         self._artwork_bytes = data
@@ -398,9 +604,8 @@ class MediaController:
             return
         if self._artwork_task is not None and not self._artwork_task.done():
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+        loop = self._loop
+        if loop is None or loop.is_closed():
             return
         self._artwork_retries += 1
         logger.debug("Artwork zatím není k dispozici, pokus %d/%d", self._artwork_retries, MAX_ARTWORK_RETRIES)
@@ -438,6 +643,9 @@ class MediaController:
             logger.exception("TryChangePlaybackPositionAsync selhalo")
             return False
         logger.info("SEEK na %s ms -> %s", position_ms, bool(accepted))
+        # Timeline se v WinRT aktualizuje asynchronně – bez krátkého odkladu by
+        # se do telefonu odeslala ještě stará pozice.
+        await asyncio.sleep(COMMAND_SETTLE_MS / 1000)
         await self.refresh()
         return bool(accepted)
 
@@ -456,6 +664,7 @@ class MediaController:
             logger.exception("%s selhalo", label)
             return False
         logger.info("%s -> %s", label, bool(accepted))
+        await asyncio.sleep(COMMAND_SETTLE_MS / 1000)
         await self.refresh()
         return bool(accepted)
 
@@ -470,15 +679,15 @@ def _timedelta_ms(value) -> int:
         return 0
 
 
-def _elapsed_since(last_updated: Optional[datetime]) -> int:
+def _elapsed_since(last_updated: datetime | None) -> int:
     """Vrátí, kolik ms uběhlo od poslední aktualizace timeline."""
     if last_updated is None:
         return 0
     try:
         reference = last_updated
         if reference.tzinfo is None:
-            reference = reference.replace(tzinfo=timezone.utc)
-        delta = datetime.now(timezone.utc) - reference
+            reference = reference.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - reference
         return max(0, int(delta.total_seconds() * 1000))
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         return 0

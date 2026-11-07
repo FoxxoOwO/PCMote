@@ -1,64 +1,25 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
-
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
-
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
-
-# Keep names of classes that implement Serializable
--keepclassmembers class * implements java.io.Serializable {
-    static final long serialVersionUID;
-    private static final java.io.ObjectStreamField[] serialPersistentFields;
-    !static !transient <fields>;
-    !private <methods>;
-}
-
-# Keep names of classes that implement Parcelable
--keep class * implements android.os.Parcelable {
-    public static final android.os.Parcelable$Creator *;
-}
-
-# Keep enums
--keepclassmembers enum * {
-    public static **[] values();
-    public static ** valueOf(java.lang.String);
-}
-
-# Keep R classes
--keepclassmembers class **.R$* {
-    public static <fields>;
-}
-
-# Keep Media3 classes
--keep class androidx.media3.** { *; }
-
-# Keep Gson classes
--keep class com.google.gson.** { *; }
--keep class * implements com.google.gson.TypeAdapter
--keep class * implements com.google.gson.JsonSerializer
--keep class * implements com.google.gson.JsonDeserializer
-
-# Keep OkHttp classes
+# PCMote ProGuard rules
+-keep class com.pcmote.android.** { *; }
+-keep class kotlinx.serialization.** { *; }
 -keep class okhttp3.** { *; }
 -keep class okio.** { *; }
 
-# Keep Kotlin coroutines
--keep class kotlinx.coroutines.** { *; }
+# Media3
+-keep class androidx.media3.** { *; }
 
-# Keep NSD classes
--keep class android.net.nsd.** { *; }
+# Hilt
+-keep class dagger.hilt.** { *; }
+-keep class com.google.dagger.hilt.** { *; }
+
+# Keep annotations
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+
+# OkHttp / Okio
+-dontwarn okhttp3.**
+-dontwarn okio.**
+
+# Kotlinx serialization
+-dontwarn kotlinx.serialization.**
+
+# NSD
+-dontwarn androidx.nsd.**

@@ -27,7 +27,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import websockets
 from websockets.asyncio.server import serve
@@ -83,14 +82,14 @@ class _ClientState:
 
     websocket: object
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    artwork_hash: Optional[str] = None
+    artwork_hash: str | None = None
 
     @property
     def peer(self) -> str:
         try:
             address = self.websocket.remote_address
             return f"{address[0]}:{address[1]}" if address else "neznámý"
-        except Exception:
+        except (AttributeError, TypeError):
             return "neznámý"
 
 
@@ -119,23 +118,23 @@ class PCMoteDaemon:
         self.port = port
         self.use_tray = use_tray
 
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._shutdown = asyncio.Event()
         self._server = None
         self._zeroconf = None
         self._service_info = None
         self._tray_icon = None
-        self._tray_thread: Optional[threading.Thread] = None
+        self._tray_thread: threading.Thread | None = None
         self._status_lock = threading.Lock()
         self._status_dialog_open = False
 
         self._clients: dict[object, _ClientState] = {}
         self._controller = MediaController(self._on_media_update)
-        self._volume = VolumeController()
-        self._volume_state: Optional[VolumeState] = None
-        self._volume_task: Optional[asyncio.Task] = None
+        self._volume = VolumeController(on_external_change=self._on_volume_external_change)
+        self._volume_state: VolumeState | None = None
+        self._volume_task: asyncio.Task | None = None
         self._snapshot = MediaSnapshot()
-        self._broadcast_task: Optional[asyncio.Task] = None
+        self._broadcast_task: asyncio.Task | None = None
         self._broadcast_dirty = False
 
     # ------------------------------------------------------------- lifecycle
@@ -149,7 +148,8 @@ class PCMoteDaemon:
         await self._controller.start()
         self._snapshot = self._controller.snapshot
         self._volume_state = self._volume.read()
-        self._volume_task = asyncio.get_running_loop().create_task(self._poll_volume())
+        self._volume.set_loop(asyncio.get_running_loop())
+        self._volume.start_polling(asyncio.get_running_loop())
         if self._volume_state is not None:
             logger.info("Hlasitost: %d %%%s", self._volume_state.percent, " (ztlumeno)" if self._volume_state.muted else "")
         if self.use_tray:
@@ -179,6 +179,7 @@ class PCMoteDaemon:
             self._broadcast_task.cancel()
         if self._volume_task is not None and not self._volume_task.done():
             self._volume_task.cancel()
+        self._volume.cleanup()
 
         for state in list(self._clients.values()):
             try:
@@ -240,7 +241,7 @@ class PCMoteDaemon:
             transport, _ = await asyncio.wait_for(
                 loop.create_connection(asyncio.Protocol, "127.0.0.1", self.port), timeout=0.5
             )
-        except (OSError, asyncio.TimeoutError):
+        except (TimeoutError, OSError):
             return
         finally:
             if transport is not None:
@@ -310,7 +311,7 @@ class PCMoteDaemon:
                 logger.warning("SET_VOLUME bez platné hodnoty volume: %r", volume)
                 return
             try:
-                requested = int(round(float(volume)))
+                requested = round(float(volume))
             except (OverflowError, ValueError):
                 # NaN nebo nekonečno z ručně psaného JSONu.
                 logger.warning("SET_VOLUME s nepoužitelnou hodnotou volume: %r", volume)
@@ -329,6 +330,24 @@ class PCMoteDaemon:
             accepted = new_volume is not None
             if new_volume is not None:
                 self._apply_volume(new_volume)
+        elif command == "MUTE_TOGGLE":
+            current = self._volume.read()
+            if current is not None:
+                with self._volume._lock:
+                    interface = self._volume._ensure_interface()
+                    if interface is not None:
+                        try:
+                            interface.SetMute(not current.muted, None)
+                            new_muted = bool(interface.GetMute())
+                            new_volume = VolumeState(percent=current.percent, muted=new_muted)
+                            self._apply_volume(new_volume)
+                            accepted = True
+                        except (AttributeError, TypeError, OSError):
+                            accepted = False
+                    else:
+                        accepted = False
+            else:
+                accepted = False
         else:
             logger.warning("Neznámý příkaz: %r", command)
             return
@@ -351,6 +370,17 @@ class PCMoteDaemon:
         )
         self._request_broadcast()
 
+    def _on_volume_external_change(self) -> None:
+        """Callback z VolumeController – voláno při změně hlasitosti mimo telefon."""
+        current = self._volume.read()
+        if current is not None and current != self._volume_state:
+            logger.debug("Hlasitost změněna mimo telefon: %d %%", current.percent)
+            self._apply_volume(current)
+        elif current is None and self._volume_state is not None:
+            logger.debug("Hlasitost už není dostupná")
+            self._volume_state = None
+            self._request_broadcast()
+
     def _apply_volume(self, state: VolumeState) -> None:
         """Zapamatuje novou hlasitost a hned ji rozešle do telefonů."""
         self._volume_state = state
@@ -365,27 +395,6 @@ class PCMoteDaemon:
         else:
             # Během rozesílání přišla další změna – po dokončení pošleme znovu.
             self._broadcast_dirty = True
-
-    async def _poll_volume(self) -> None:
-        """Sleduje hlasitost změněnou mimo telefon a rozesílá ji."""
-        try:
-            while True:
-                await asyncio.sleep(VOLUME_POLL_INTERVAL)
-                # Voláme přímo v event loopu: COM objekt je vázaný na jedno vlákno,
-                # práce je to krátká (jedno WASAPI volání).
-                current = self._volume.read()
-                if current is not None and current != self._volume_state:
-                    logger.debug("Hlasitost změněna mimo telefon: %s %%", current.percent)
-                    self._apply_volume(current)
-                elif current is None and self._volume_state is not None:
-                    # Zařízení zmizelo (odpojený reproduktor) – přestaneme hlásit hodnotu.
-                    logger.debug("Hlasitost už není dostupná")
-                    self._volume_state = None
-                    self._request_broadcast()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Sledování hlasitosti selhalo")
 
     async def _broadcast(self) -> None:
         try:
@@ -764,11 +773,12 @@ def _hide_console() -> None:
         window = ctypes.windll.kernel32.GetConsoleWindow()
         if window:
             ctypes.windll.user32.ShowWindow(window, 0)
-    except Exception:
+    except (ImportError, AttributeError, OSError):
+        # Ignore if ctypes is unavailable or console window not found
         pass
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="PCMote – Windows daemon pro vzdálené ovládání přehrávače")
     parser.add_argument("--host", default="0.0.0.0", help="Adresa pro WebSocket server (výchozí 0.0.0.0)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Port (výchozí {DEFAULT_PORT})")
@@ -868,7 +878,7 @@ def _show_message(title: str, text: str, console_visible: bool, error: bool = Tr
         print(f"{title}: {text}", file=sys.stderr)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     if not args.debug and not args.keep_console:

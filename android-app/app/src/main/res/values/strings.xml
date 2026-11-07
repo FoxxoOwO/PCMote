@@ -1,43 +1,75 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PCMote</string>
-    <string name="subtitle">Control the player on your PC</string>
+    <string name="media_service_name">PCMote Media Controller</string>
+    <string name="notification_channel_name">PCMote Media Control</string>
+    <string name="notification_channel_description">Controls media playback on remote PC</string>
 
+    <!-- UI Strings -->
+    <string name="connect_to_pc">Connect to PC</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="connection_status">Connection Status</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="connecting">Connecting…</string>
+    <string name="searching">Searching for PC…</string>
+    <string name="pc_found">PC found: %s</string>
+    <string name="no_pc_found">No PC found on network</string>
+    <string name="manual_ip_hint">Or enter IP manually</string>
+    <string name="ip_address">IP Address</string>
+    <string name="port">Port</string>
+    <string name="default_port">8765</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="auto_reconnect">Auto-reconnect</string>
+    <string name="show_notification">Show persistent notification</string>
+    <string name="media_controls">Media Controls</string>
+    <string name="play_pause">Play/Pause</string>
+    <string name="next_track">Next</string>
+    <string name="previous_track">Previous</string>
+    <string name="volume_up">Volume Up</string>
+    <string name="volume_down">Volume Down</string>
+    <string name="mute_toggle">Mute/Unmute</string>
+    <string name="now_playing">Now Playing</string>
+    <string name="unknown_title">Unknown Title</string>
+    <string name="unknown_artist">Unknown Artist</string>
+    <string name="unknown_album">Unknown Album</string>
+    <string name="no_active_session">No active media session on PC</string>
+    <string name="error_connection_failed">Connection failed: %s</string>
+    <string name="error_timeout">Connection timeout</string>
+    <string name="settings">Settings</string>
+    <string name="about">About</string>
+    <string name="version">Version %s</string>
+    <string name="autostart_title">Start on boot</string>
+    <string name="autostart_summary">Automatically connect to PC when phone starts</string>
+
+    <!-- Missing strings for PcmoteScreen -->
+    <string name="subtitle">Remote Media Controller</string>
     <string name="status_connected">Connected</string>
     <string name="status_connecting">Connecting…</string>
-    <string name="status_disconnected">Not connected</string>
-    <string name="status_error">Connection error</string>
-
+    <string name="status_error">Error</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="action_change_pc">Change PC</string>
     <string name="action_connect">Connect</string>
     <string name="action_disconnect">Disconnect</string>
-    <string name="action_change_pc">Change PC</string>
-    <string name="action_cancel">Cancel</string>
-    <string name="action_refresh">Refresh scan</string>
-
-    <string name="now_playing_placeholder">Nothing is playing</string>
-    <string name="unknown_artist">Unknown artist</string>
-    <string name="unknown_album">Unknown album</string>
-    <string name="source_prefix">Source</string>
-
-    <string name="cd_play">Play</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="now_playing_placeholder">No media playing</string>
+    <string name="cd_previous">Previous</string>
     <string name="cd_pause">Pause</string>
-    <string name="cd_next">Next track</string>
-    <string name="cd_previous">Previous track</string>
-    <string name="cd_volume_up">Increase PC volume</string>
-    <string name="cd_volume_down">Decrease PC volume</string>
-    <string name="volume_percent">%1$d %%</string>
-    <string name="volume_muted">Muted</string>
+    <string name="cd_play">Play</string>
+    <string name="cd_next">Next</string>
+    <string name="source_prefix">Source</string>
+    <string name="cd_volume_down">Volume down</string>
+    <string name="cd_volume_up">Volume up</string>
     <string name="volume_unknown">—</string>
+    <string name="volume_muted">Muted</string>
+    <string name="volume_percent">%d%%</string>
     <string name="cd_artwork">Album artwork</string>
-
-    <string name="discovery_title">Found devices</string>
-    <string name="discovery_empty">No PC found. Start the daemon and tap Refresh.</string>
-    <string name="discovery_scanning">Searching for a PC on the network…</string>
-    <string name="discovery_not_found">No PC was found. Check that the daemon is running, or enter the IP address manually.</string>
-
-    <string name="dialog_manual_title">Connect to PC</string>
-    <string name="dialog_ip_label">IP address or hostname</string>
+    <string name="discovery_title">Discovered PCs</string>
+    <string name="discovery_scanning">Scanning…</string>
+    <string name="discovery_empty">No PCs found</string>
+    <string name="discovery_not_found">No PC found on network. Make sure the daemon is running.</string>
+    <string name="dialog_manual_title">Manual connection</string>
+    <string name="dialog_ip_label">IP address</string>
     <string name="dialog_port_label">Port</string>
-
-    <string name="notification_channel_name">Playback on PC</string>
+    <string name="action_cancel">Cancel</string>
 </resources>

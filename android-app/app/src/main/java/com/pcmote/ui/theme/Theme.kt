@@ -3,9 +3,7 @@ package com.pcmote.ui.theme
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -25,10 +23,9 @@ private fun dynamicScheme(darkTheme: Boolean) = if (darkTheme) {
 }
 
 /**
- * Material 3 Expressive theme. On Android 12+ the palette is taken from the wallpaper,
+ * Material 3 theme. On Android 12+ the palette is taken from the wallpaper,
  * otherwise the built-in baseline scheme is used.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PcmoteTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -40,9 +37,8 @@ fun PcmoteTheme(
         else -> FallbackLightScheme
     }
 
-    MaterialExpressiveTheme(
+    MaterialTheme(
         colorScheme = colorScheme,
-        motionScheme = MotionScheme.expressive(),
         content = content
     )
 }
